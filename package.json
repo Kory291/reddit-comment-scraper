@@ -1,0 +1,15 @@
+{
+  "name": "arctic-shift-scraper",
+  "version": "1.0.0",
+  "description": "Scrape posts and comments from a subreddit via Arctic Shift API",
+  "type": "module",
+  "scripts": {
+    "start": "npx tsx src/main.ts",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.4.0"
+  }
+}
