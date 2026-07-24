@@ -11,6 +11,15 @@ const OUTPUT_FILE       = 'output.json';
 const WORD_STATS_FILE   = 'word-stats.json';
 const TOP_N_WORDS       = 100; // How many top words to include in the stats file
 
+// Words to explicitly track (case-insensitive). Leave empty [] to skip.
+const TRACKED_WORDS = [
+  'lol',
+  'cringe',
+  'based',
+];
+
+const TRACKED_WORDS_FILE = 'tracked-words.json';
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Post {
@@ -47,6 +56,18 @@ interface WordStats {
   totalWords: number;
   uniqueWords: number;
   topWords: Array<{ word: string; count: number; percentage: string }>;
+}
+
+interface TrackedWordStats {
+  totalComments: number;
+  totalWords: number;
+  trackedWords: Array<{
+    word: string;
+    count: number;
+    percentage: string;       // share of all words
+    commentsContaining: number; // how many comments contain the word at least once
+    commentPercentage: string;  // share of all comments
+  }>;
 }
 
 // ─── Word counting ──────────────────────────────────────────────────────────
@@ -126,7 +147,56 @@ function buildWordStats(
   };
 }
 
-// ─── HTTP helper ─────────────────────────────────────────────────────────────
+/**
+ * Counts occurrences of each tracked word across all comment bodies.
+ * Also records how many individual comments contain each word.
+ */
+function countTrackedWords(
+  results: ScrapeResult[],
+  trackedWords: string[]
+): TrackedWordStats {
+  const words = trackedWords.map((w) => w.toLowerCase());
+  const counts = new Map<string, number>(words.map((w) => [w, 0]));
+  const commentHits = new Map<string, number>(words.map((w) => [w, 0]));
+  let totalComments = 0;
+  let totalWords = 0;
+
+  for (const { comments } of results) {
+    for (const comment of comments) {
+      totalComments++;
+      const tokens = tokenize(comment.body);
+      totalWords += tokens.length;
+      const bodyWords = new Set(tokens); // for per-comment presence check
+      for (const word of words) {
+        const occurrences = tokens.filter((t) => t === word).length;
+        counts.set(word, counts.get(word)! + occurrences);
+        if (bodyWords.has(word)) {
+          commentHits.set(word, commentHits.get(word)! + 1);
+        }
+      }
+    }
+  }
+
+  const trackedWordStats = words.map((word) => {
+    const count = counts.get(word)!;
+    const commentsContaining = commentHits.get(word)!;
+    return {
+      word,
+      count,
+      percentage: totalWords > 0
+        ? ((count / totalWords) * 100).toFixed(4) + '%'
+        : '0%',
+      commentsContaining,
+      commentPercentage: totalComments > 0
+        ? ((commentsContaining / totalComments) * 100).toFixed(2) + '%'
+        : '0%',
+    };
+  }).sort((a, b) => b.count - a.count);
+
+  return { totalComments, totalWords, trackedWords: trackedWordStats };
+}
+
+
 
 async function apiFetch<T>(
   path: string,
@@ -296,6 +366,20 @@ async function main() {
   stats.topWords.slice(0, 10).forEach(({ word, count, percentage }) => {
     console.log(`    ${word.padEnd(20)} ${String(count).padStart(7)}  (${percentage})`);
   });
+
+  // Step 3b: Tracked words
+  if (TRACKED_WORDS.length > 0) {
+    console.log('\n[Tracked words]');
+    const tracked = countTrackedWords(results, TRACKED_WORDS);
+    tracked.trackedWords.forEach(({ word, count, percentage, commentsContaining, commentPercentage }) => {
+      console.log(
+        `  ${word.padEnd(20)} ${String(count).padStart(7)} occurrences (${percentage} of words)` +
+        `  |  in ${commentsContaining} comments (${commentPercentage})`
+      );
+    });
+    writeFileSync(TRACKED_WORDS_FILE, JSON.stringify(tracked, null, 2), 'utf-8');
+    console.log(`Tracked words written to ${TRACKED_WORDS_FILE}`);
+  }
 
   // Step 4: Write output files
   console.log(`\nSummary: ${posts.length} posts, ${totalComments} comments`);
