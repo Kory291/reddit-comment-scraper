@@ -17,10 +17,11 @@ const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 400;
 const RETRY_MAX_DELAY_MS = 8000;
 const RETRY_JITTER_MS = 250;
+const MAX_ALLOWED_COMMENTS = 200;
 
 // Comment language filter
 const FILTER_MOSTLY_GERMAN = true; // When enabled, selected language codes are dropped
-const DROPPED_LANGUAGE_CODES = new Set(['eng', 'sco', 'nld']);
+const ALLOWED_LANGUAGE_CODES = new Set(['deu']);
 const DROP_DELETED_COMMENTS = true;
 const MIN_CHARS_FOR_LANGUAGE_CHECK = 7;
 const LOG_DROPPED_COMMENTS = true;
@@ -456,7 +457,7 @@ async function main() {
     for (const comment of comments) {
       const isDeletedText = comment.body.trim().toLowerCase() === '[deleted]';
       const lang = detectLanguageCode(comment.body);
-      const shouldDropByLanguage = FILTER_MOSTLY_GERMAN && DROPPED_LANGUAGE_CODES.has(lang);
+      const shouldDropByLanguage = FILTER_MOSTLY_GERMAN && !ALLOWED_LANGUAGE_CODES.has(lang);
       const shouldDrop = shouldDropByLanguage || (DROP_DELETED_COMMENTS && isDeletedText);
 
       if (LOG_LANGUAGE_DEBUG) {
@@ -477,6 +478,11 @@ async function main() {
         console.log(
           `    lang debug ${comment.id} by ${comment.author} => ${lang} (${action}) :: ${preview}`
         );
+      }
+
+      if (filteredComments.length >= MAX_ALLOWED_COMMENTS) {
+        console.log("Found enough comments, will break now ...")
+        break
       }
 
       if (!FILTER_MOSTLY_GERMAN) {
