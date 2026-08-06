@@ -12,6 +12,11 @@ const OUTPUT_FILE       = 'output.json';
 const WORD_STATS_FILE   = 'word-stats.json';
 const TOP_N_WORDS       = 100; // How many top words to include in the stats file
 const REQUEST_DELAY_MS  = 150; // Delay before each HTTP request to reduce 422/rate-limit issues
+const RETRYABLE_STATUS_CODES = new Set([422, 429]);
+const MAX_RETRIES = 4;
+const RETRY_BASE_DELAY_MS = 400;
+const RETRY_MAX_DELAY_MS = 8000;
+const RETRY_JITTER_MS = 250;
 
 // Comment language filter
 const FILTER_MOSTLY_GERMAN = true; // When enabled, only English comments are dropped
@@ -242,26 +247,65 @@ async function apiFetch<T>(
   path: string,
   params: Record<string, string>
 ): Promise<T[]> {
-  // Gentle pacing before every request to avoid API-side validation/rate issues.
-  await delay(REQUEST_DELAY_MS);
-
   const url = new URL(`${BASE_URL}${path}`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
 
-  console.log(`  GET ${url.toString()}`);
+  const getRetryDelayMs = (attempt: number, retryAfterHeader: string | null): number => {
+    if (retryAfterHeader) {
+      const asSeconds = Number(retryAfterHeader);
+      if (!Number.isNaN(asSeconds) && asSeconds >= 0) {
+        return Math.min(asSeconds * 1000, RETRY_MAX_DELAY_MS);
+      }
 
-  const res = await fetch(url.toString(), {
-    headers: { 'User-Agent': 'arctic-shift-scraper/1.0' },
-  });
+      const asDate = Date.parse(retryAfterHeader);
+      if (!Number.isNaN(asDate)) {
+        const waitMs = asDate - Date.now();
+        if (waitMs > 0) {
+          return Math.min(waitMs, RETRY_MAX_DELAY_MS);
+        }
+      }
+    }
 
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} for ${url}: ${await res.text()}`);
+    const exp = RETRY_BASE_DELAY_MS * (2 ** attempt);
+    const jitter = Math.floor(Math.random() * RETRY_JITTER_MS);
+    return Math.min(exp + jitter, RETRY_MAX_DELAY_MS);
+  };
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Gentle pacing before every request to avoid API-side validation/rate issues.
+    await delay(REQUEST_DELAY_MS);
+
+    console.log(`  GET ${url.toString()}${attempt > 0 ? ` (retry ${attempt}/${MAX_RETRIES})` : ''}`);
+
+    const res = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'arctic-shift-scraper/1.0' },
+    });
+
+    if (res.ok) {
+      const json = (await res.json()) as ApiResponse<T>;
+      return json.data;
+    }
+
+    const body = await res.text();
+    const isRetryable = RETRYABLE_STATUS_CODES.has(res.status);
+    const hasRetriesLeft = attempt < MAX_RETRIES;
+
+    if (isRetryable && hasRetriesLeft) {
+      const waitMs = getRetryDelayMs(attempt, res.headers.get('retry-after'));
+      console.warn(
+        `  HTTP ${res.status} for ${url} (attempt ${attempt + 1}/${MAX_RETRIES + 1}). ` +
+        `Retrying in ${waitMs}ms...`
+      );
+      await delay(waitMs);
+      continue;
+    }
+
+    throw new Error(`HTTP ${res.status} for ${url}: ${body}`);
   }
 
-  const json = (await res.json()) as ApiResponse<T>;
-  return json.data;
+  throw new Error(`Request failed after retries for ${url}`);
 }
 
 // ─── Paginated fetchers ───────────────────────────────────────────────────────
