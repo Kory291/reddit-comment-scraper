@@ -18,6 +18,7 @@ const FILTER_MOSTLY_GERMAN = true;
 const MIN_CHARS_FOR_LANGUAGE_CHECK = 5;
 const LOG_DROPPED_COMMENTS = true;
 const DROPPED_COMMENT_PREVIEW_LEN = 120;
+const DROPPED_COMMENTS_FILE = 'dropped-comments.json';
 
 // Words to explicitly track (case-insensitive). Leave empty [] to skip.
 const TRACKED_WORDS = [
@@ -76,6 +77,18 @@ interface TrackedWordStats {
     commentsContaining: number; // how many comments contain the word at least once
     commentPercentage: string;  // share of all comments
   }>;
+}
+
+interface DroppedCommentLogEntry {
+  post_id: string;
+  post_title: string;
+  comment_id: string;
+  author: string;
+  created_utc: number;
+  language: string;
+  reason: string;
+  preview: string;
+  body: string;
 }
 
 // ─── Word counting ──────────────────────────────────────────────────────────
@@ -377,6 +390,7 @@ async function main() {
   // Step 2: For each post fetch its comments in date range
   console.log('[2/2] Fetching comments for each post...');
   const results: ScrapeResult[] = [];
+  const droppedComments: DroppedCommentLogEntry[] = [];
 
   for (let i = 0; i < posts.length; i++) {
     const post = posts[i]!;
@@ -403,8 +417,22 @@ async function main() {
         const reason = comment.body.trim().length < MIN_CHARS_FOR_LANGUAGE_CHECK
           ? `too short (<${MIN_CHARS_FOR_LANGUAGE_CHECK})`
           : `lang=${lang}`;
+        const preview = makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN);
+
+        droppedComments.push({
+          post_id: post.id,
+          post_title: post.title,
+          comment_id: comment.id,
+          author: comment.author,
+          created_utc: comment.created_utc,
+          language: lang,
+          reason,
+          preview,
+          body: comment.body,
+        });
+
         console.log(
-          `    dropped comment ${comment.id} by ${comment.author} (${reason}) :: ${makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN)}`
+          `    dropped comment ${comment.id} by ${comment.author} (${reason}) :: ${preview}`
         );
       }
     }
@@ -451,6 +479,11 @@ async function main() {
 
   writeFileSync(WORD_STATS_FILE, JSON.stringify(stats, null, 2), 'utf-8');
   console.log(`Word stats written to ${WORD_STATS_FILE}`);
+
+  if (LOG_DROPPED_COMMENTS && FILTER_MOSTLY_GERMAN) {
+    writeFileSync(DROPPED_COMMENTS_FILE, JSON.stringify(droppedComments, null, 2), 'utf-8');
+    console.log(`Dropped comments written to ${DROPPED_COMMENTS_FILE} (${droppedComments.length})`);
+  }
 }
 
 main().catch((err) => {
