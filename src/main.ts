@@ -19,7 +19,8 @@ const RETRY_MAX_DELAY_MS = 8000;
 const RETRY_JITTER_MS = 250;
 
 // Comment language filter
-const FILTER_MOSTLY_GERMAN = true; // When enabled, only English comments are dropped
+const FILTER_MOSTLY_GERMAN = true; // When enabled, selected language codes are dropped
+const DROPPED_LANGUAGE_CODES = new Set(['eng', 'sco']);
 const MIN_CHARS_FOR_LANGUAGE_CHECK = 7;
 const LOG_DROPPED_COMMENTS = true;
 const DROPPED_COMMENT_PREVIEW_LEN = 120;
@@ -453,7 +454,7 @@ async function main() {
 
     for (const comment of comments) {
       const lang = detectLanguageCode(comment.body);
-      const shouldDrop = FILTER_MOSTLY_GERMAN && lang === 'eng';
+      const shouldDrop = FILTER_MOSTLY_GERMAN && DROPPED_LANGUAGE_CODES.has(lang);
 
       if (LOG_LANGUAGE_DEBUG) {
         const action: 'keep' | 'drop' = shouldDrop ? 'drop' : 'keep';
@@ -480,7 +481,7 @@ async function main() {
         continue;
       }
 
-      if (lang !== 'eng') {
+      if (!DROPPED_LANGUAGE_CODES.has(lang)) {
         filteredComments.push(comment);
         continue;
       }
