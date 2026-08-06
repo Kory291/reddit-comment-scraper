@@ -24,6 +24,8 @@ const MIN_CHARS_FOR_LANGUAGE_CHECK = 7;
 const LOG_DROPPED_COMMENTS = true;
 const DROPPED_COMMENT_PREVIEW_LEN = 120;
 const DROPPED_COMMENTS_FILE = 'dropped-comments.json';
+const LOG_LANGUAGE_DEBUG = true;
+const LANGUAGE_DEBUG_FILE = 'comment-language-debug.json';
 
 // Words to explicitly track (case-insensitive). Leave empty [] to skip.
 const TRACKED_WORDS = [
@@ -94,6 +96,17 @@ interface DroppedCommentLogEntry {
   reason: string;
   preview: string;
   body: string;
+}
+
+interface CommentLanguageDebugEntry {
+  post_id: string;
+  post_title: string;
+  comment_id: string;
+  author: string;
+  created_utc: number;
+  language: string;
+  action: 'keep' | 'drop';
+  preview: string;
 }
 
 // ─── Word counting ──────────────────────────────────────────────────────────
@@ -427,6 +440,7 @@ async function main() {
   console.log('[2/2] Fetching comments for each post...');
   const results: ScrapeResult[] = [];
   const droppedComments: DroppedCommentLogEntry[] = [];
+  const languageDebugEntries: CommentLanguageDebugEntry[] = [];
 
   for (let i = 0; i < posts.length; i++) {
     const post = posts[i]!;
@@ -438,12 +452,34 @@ async function main() {
     const filteredComments: Comment[] = [];
 
     for (const comment of comments) {
+      const lang = detectLanguageCode(comment.body);
+      const shouldDrop = FILTER_MOSTLY_GERMAN && lang === 'eng';
+
+      if (LOG_LANGUAGE_DEBUG) {
+        const action: 'keep' | 'drop' = shouldDrop ? 'drop' : 'keep';
+        const preview = makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN);
+
+        languageDebugEntries.push({
+          post_id: post.id,
+          post_title: post.title,
+          comment_id: comment.id,
+          author: comment.author,
+          created_utc: comment.created_utc,
+          language: lang,
+          action,
+          preview,
+        });
+
+        console.log(
+          `    lang debug ${comment.id} by ${comment.author} => ${lang} (${action}) :: ${preview}`
+        );
+      }
+
       if (!FILTER_MOSTLY_GERMAN) {
         filteredComments.push(comment);
         continue;
       }
 
-      const lang = detectLanguageCode(comment.body);
       if (lang !== 'eng') {
         filteredComments.push(comment);
         continue;
@@ -517,6 +553,11 @@ async function main() {
   if (LOG_DROPPED_COMMENTS && FILTER_MOSTLY_GERMAN) {
     writeFileSync(DROPPED_COMMENTS_FILE, JSON.stringify(droppedComments, null, 2), 'utf-8');
     console.log(`Dropped comments written to ${DROPPED_COMMENTS_FILE} (${droppedComments.length})`);
+  }
+
+  if (LOG_LANGUAGE_DEBUG) {
+    writeFileSync(LANGUAGE_DEBUG_FILE, JSON.stringify(languageDebugEntries, null, 2), 'utf-8');
+    console.log(`Language debug written to ${LANGUAGE_DEBUG_FILE} (${languageDebugEntries.length})`);
   }
 }
 
