@@ -14,8 +14,8 @@ const TOP_N_WORDS       = 100; // How many top words to include in the stats fil
 const REQUEST_DELAY_MS  = 150; // Delay before each HTTP request to reduce 422/rate-limit issues
 
 // Comment language filter
-const FILTER_MOSTLY_GERMAN = true;
-const MIN_CHARS_FOR_LANGUAGE_CHECK = 5;
+const FILTER_MOSTLY_GERMAN = true; // When enabled, only English comments are dropped
+const MIN_CHARS_FOR_LANGUAGE_CHECK = 7;
 const LOG_DROPPED_COMMENTS = true;
 const DROPPED_COMMENT_PREVIEW_LEN = 120;
 const DROPPED_COMMENTS_FILE = 'dropped-comments.json';
@@ -130,15 +130,7 @@ function detectLanguageCode(text: string): string {
 
   return franc(text, {
     minLength: MIN_CHARS_FOR_LANGUAGE_CHECK,
-    only: ['deu', 'eng'],
   });
-}
-
-/**
- * Uses language detection to keep comments that are primarily German.
- */
-function isMostlyGerman(text: string): boolean {
-  return detectLanguageCode(text) === 'deu';
 }
 
 function makePreview(text: string, maxLen: number): string {
@@ -408,15 +400,13 @@ async function main() {
       }
 
       const lang = detectLanguageCode(comment.body);
-      if (lang === 'deu') {
+      if (lang !== 'eng') {
         filteredComments.push(comment);
         continue;
       }
 
       if (LOG_DROPPED_COMMENTS) {
-        const reason = comment.body.trim().length < MIN_CHARS_FOR_LANGUAGE_CHECK
-          ? `too short (<${MIN_CHARS_FOR_LANGUAGE_CHECK})`
-          : `lang=${lang}`;
+        const reason = `lang=${lang}`;
         const preview = makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN);
 
         droppedComments.push({
