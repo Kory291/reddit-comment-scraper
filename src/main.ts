@@ -17,7 +17,7 @@ const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 400;
 const RETRY_MAX_DELAY_MS = 8000;
 const RETRY_JITTER_MS = 250;
-const MAX_ALLOWED_COMMENTS = 200;
+const MAX_ALLOWED_COMMENTS = 20000;
 
 // Comment language filter
 const FILTER_MOSTLY_GERMAN = true; // When enabled, selected language codes are dropped
@@ -480,11 +480,6 @@ async function main() {
         );
       }
 
-      if (filteredComments.length >= MAX_ALLOWED_COMMENTS) {
-        console.log("Found enough comments, will break now ...")
-        break
-      }
-
       if (!FILTER_MOSTLY_GERMAN) {
         if (!(DROP_DELETED_COMMENTS && isDeletedText)) {
           filteredComments.push(comment);
@@ -521,6 +516,13 @@ async function main() {
 
     process.stdout.write(`${filteredComments.length}/${comments.length} comments kept\n`);
     results.push({ post, comments: filteredComments });
+  
+    var current_comments = results.reduce((sum, r) => sum + r.comments.length, 0);
+    console.log("Read " + current_comments + "/" + MAX_ALLOWED_COMMENTS + " comments");
+    if (current_comments >= MAX_ALLOWED_COMMENTS) {
+      console.log("Reached max allowed comments");
+      break;
+    }
 
     // Polite delay between posts to avoid rate-limiting
     if (i < posts.length - 1) await delay(300);
