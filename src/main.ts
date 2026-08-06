@@ -20,7 +20,8 @@ const RETRY_JITTER_MS = 250;
 
 // Comment language filter
 const FILTER_MOSTLY_GERMAN = true; // When enabled, selected language codes are dropped
-const DROPPED_LANGUAGE_CODES = new Set(['eng', 'sco']);
+const DROPPED_LANGUAGE_CODES = new Set(['eng', 'sco', 'nld']);
+const DROP_DELETED_COMMENTS = true;
 const MIN_CHARS_FOR_LANGUAGE_CHECK = 7;
 const LOG_DROPPED_COMMENTS = true;
 const DROPPED_COMMENT_PREVIEW_LEN = 120;
@@ -453,8 +454,10 @@ async function main() {
     const filteredComments: Comment[] = [];
 
     for (const comment of comments) {
+      const isDeletedText = comment.body.trim().toLowerCase() === '[deleted]';
       const lang = detectLanguageCode(comment.body);
-      const shouldDrop = FILTER_MOSTLY_GERMAN && DROPPED_LANGUAGE_CODES.has(lang);
+      const shouldDropByLanguage = FILTER_MOSTLY_GERMAN && DROPPED_LANGUAGE_CODES.has(lang);
+      const shouldDrop = shouldDropByLanguage || (DROP_DELETED_COMMENTS && isDeletedText);
 
       if (LOG_LANGUAGE_DEBUG) {
         const action: 'keep' | 'drop' = shouldDrop ? 'drop' : 'keep';
@@ -477,17 +480,19 @@ async function main() {
       }
 
       if (!FILTER_MOSTLY_GERMAN) {
-        filteredComments.push(comment);
+        if (!(DROP_DELETED_COMMENTS && isDeletedText)) {
+          filteredComments.push(comment);
+        }
         continue;
       }
 
-      if (!DROPPED_LANGUAGE_CODES.has(lang)) {
+      if (!shouldDrop) {
         filteredComments.push(comment);
         continue;
       }
 
       if (LOG_DROPPED_COMMENTS) {
-        const reason = `lang=${lang}`;
+        const reason = isDeletedText ? 'deleted-text' : `lang=${lang}`;
         const preview = makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN);
 
         droppedComments.push({
