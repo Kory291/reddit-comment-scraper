@@ -15,7 +15,9 @@ const REQUEST_DELAY_MS  = 150; // Delay before each HTTP request to reduce 422/r
 
 // Comment language filter
 const FILTER_MOSTLY_GERMAN = true;
-const MIN_CHARS_FOR_LANGUAGE_CHECK = 25;
+const MIN_CHARS_FOR_LANGUAGE_CHECK = 5;
+const LOG_DROPPED_COMMENTS = true;
+const DROPPED_COMMENT_PREVIEW_LEN = 120;
 
 // Words to explicitly track (case-insensitive). Leave empty [] to skip.
 const TRACKED_WORDS = [
@@ -106,19 +108,30 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * Uses franc to detect if a comment is primarily German.
+ * Detects language code for a comment using franc.
  */
-function isMostlyGerman(text: string): boolean {
+function detectLanguageCode(text: string): string {
   if (text.trim().length < MIN_CHARS_FOR_LANGUAGE_CHECK) {
-    return false;
+    return 'und';
   }
 
-  const lang = franc(text, {
+  return franc(text, {
     minLength: MIN_CHARS_FOR_LANGUAGE_CHECK,
     only: ['deu', 'eng'],
   });
+}
 
-  return lang === 'deu';
+/**
+ * Uses language detection to keep comments that are primarily German.
+ */
+function isMostlyGerman(text: string): boolean {
+  return detectLanguageCode(text) === 'deu';
+}
+
+function makePreview(text: string, maxLen: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLen) return compact;
+  return compact.slice(0, maxLen) + '...';
 }
 
 /**
@@ -372,9 +385,30 @@ async function main() {
     );
 
     const comments = await fetchCommentsForPost(post.id, AFTER_DATE, BEFORE_DATE);
-    const filteredComments = FILTER_MOSTLY_GERMAN
-      ? comments.filter((c) => isMostlyGerman(c.body))
-      : comments;
+    const filteredComments: Comment[] = [];
+
+    for (const comment of comments) {
+      if (!FILTER_MOSTLY_GERMAN) {
+        filteredComments.push(comment);
+        continue;
+      }
+
+      const lang = detectLanguageCode(comment.body);
+      if (lang === 'deu') {
+        filteredComments.push(comment);
+        continue;
+      }
+
+      if (LOG_DROPPED_COMMENTS) {
+        const reason = comment.body.trim().length < MIN_CHARS_FOR_LANGUAGE_CHECK
+          ? `too short (<${MIN_CHARS_FOR_LANGUAGE_CHECK})`
+          : `lang=${lang}`;
+        console.log(
+          `    dropped comment ${comment.id} by ${comment.author} (${reason}) :: ${makePreview(comment.body, DROPPED_COMMENT_PREVIEW_LEN)}`
+        );
+      }
+    }
+
     process.stdout.write(`${filteredComments.length}/${comments.length} comments kept\n`);
     results.push({ post, comments: filteredComments });
 
