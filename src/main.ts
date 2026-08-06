@@ -1,4 +1,5 @@
 import { writeFileSync } from 'fs';
+import { franc } from 'franc';
 
 const BASE_URL = 'https://arctic-shift.photon-reddit.com';
 
@@ -10,6 +11,11 @@ const BEFORE_DATE: string | undefined = '2017-01-01'; // Optional upper bound, e
 const OUTPUT_FILE       = 'output.json';
 const WORD_STATS_FILE   = 'word-stats.json';
 const TOP_N_WORDS       = 100; // How many top words to include in the stats file
+const REQUEST_DELAY_MS  = 150; // Delay before each HTTP request to reduce 422/rate-limit issues
+
+// Comment language filter
+const FILTER_MOSTLY_GERMAN = true;
+const MIN_CHARS_FOR_LANGUAGE_CHECK = 25;
 
 // Words to explicitly track (case-insensitive). Leave empty [] to skip.
 const TRACKED_WORDS = [
@@ -97,6 +103,22 @@ function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .match(/\b[a-z]{2,}\b/g) ?? [];
+}
+
+/**
+ * Uses franc to detect if a comment is primarily German.
+ */
+function isMostlyGerman(text: string): boolean {
+  if (text.trim().length < MIN_CHARS_FOR_LANGUAGE_CHECK) {
+    return false;
+  }
+
+  const lang = franc(text, {
+    minLength: MIN_CHARS_FOR_LANGUAGE_CHECK,
+    only: ['deu', 'eng'],
+  });
+
+  return lang === 'deu';
 }
 
 /**
@@ -202,6 +224,9 @@ async function apiFetch<T>(
   path: string,
   params: Record<string, string>
 ): Promise<T[]> {
+  // Gentle pacing before every request to avoid API-side validation/rate issues.
+  await delay(REQUEST_DELAY_MS);
+
   const url = new URL(`${BASE_URL}${path}`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
@@ -347,8 +372,11 @@ async function main() {
     );
 
     const comments = await fetchCommentsForPost(post.id, AFTER_DATE, BEFORE_DATE);
-    process.stdout.write(`${comments.length} comments\n`);
-    results.push({ post, comments });
+    const filteredComments = FILTER_MOSTLY_GERMAN
+      ? comments.filter((c) => isMostlyGerman(c.body))
+      : comments;
+    process.stdout.write(`${filteredComments.length}/${comments.length} comments kept\n`);
+    results.push({ post, comments: filteredComments });
 
     // Polite delay between posts to avoid rate-limiting
     if (i < posts.length - 1) await delay(300);
